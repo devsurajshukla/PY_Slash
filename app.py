@@ -1,0 +1,18 @@
+from flask import Flask
+from routes.user_routes import user_routes
+from routes.product_routes import product_routes
+
+
+app = Flask(__name__)
+
+app.register_blueprint(user_routes)
+app.register_blueprint(product_routes)
+
+
+@app.route('/')
+def home():
+    return "Welcome to the User Management API!"
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
