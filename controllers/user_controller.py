@@ -1,10 +1,15 @@
-from db import get_db_connection
 from db_sqlalchemy import get_db_session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
 from models.user import User
 import bcrypt
 import re
+import os
+import jwt
+from datetime import datetime, timedelta, timezone
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 
@@ -25,6 +30,27 @@ def hash_password(password):
         password.encode("utf-8"),
         bcrypt.gensalt()
     ).decode("utf-8")
+
+def generate_token(user):
+    secret_key = os.getenv("JWT_SECRET_KEY")
+
+    if not secret_key:
+        raise RuntimeError("JWT_SECRET_KEY is not configured.")
+
+    payload = {
+        "sub": str(user.id),
+        "role": user.role,
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1)
+    }
+
+    token = jwt.encode(
+        payload,
+        secret_key,
+        algorithm="HS256"
+    )
+
+    return token
 
 
 def get_users():
@@ -214,19 +240,37 @@ def delete_user(user_id):
             db.rollback()
             raise
 
+
 def login_user(email, password):
-    if not email or not password:
+    if not isinstance(email, str) or not email.strip():
+        return None, "Email and password are required."
+
+    if not isinstance(password, str) or not password:
         return None, "Email and password are required."
 
     with get_db_session() as db:
         user = db.scalar(
-            select(User).where(User.email == email)
+            select(User).where(User.email == email.strip())
         )
 
         if not user:
             return None, "Invalid email or password."
 
-        if not bcrypt.checkpw(password.encode("utf-8"), user.password.encode("utf-8")):
+        try:
+            password_valid = bcrypt.checkpw(
+                password.encode("utf-8"),
+                user.password.encode("utf-8")
+            )
+        except (ValueError, TypeError):
+            password_valid = False
+
+        if not password_valid:
             return None, "Invalid email or password."
 
-        return user_to_dict(user), None
+        user_data = user_to_dict(user)
+        token = generate_token(user)
+
+        return {
+            "token": token,
+            "user": user_data
+        }, None

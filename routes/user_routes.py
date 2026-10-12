@@ -61,9 +61,17 @@ def remove_user(user_id):
         "message": "User deleted successfully."
     })
 
+
 @user_routes.route('/login', methods=['POST'])
 def login():
-    login_data = request.get_json()
+    login_data = request.get_json(silent=True)
+
+    if not isinstance(login_data, dict):
+        return jsonify({
+            "success": False,
+            "message": "Valid JSON body is required."
+        }), 400
+
     email = login_data.get('email')
     password = login_data.get('password')
 
@@ -73,10 +81,10 @@ def login():
         return jsonify({
             "success": False,
             "message": error
-        }), 400
+        }), 401
 
     return jsonify({
         "success": True,
         "message": "Login successful.",
         "data": user
-    })
+    }), 200
