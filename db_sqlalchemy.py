@@ -6,13 +6,16 @@ from sqlalchemy.orm import sessionmaker
 
 load_dotenv()
 
-db_HOST = os.getenv("DB_HOST")
-db_PORT = os.getenv("DB_PORT")
-db_USER = os.getenv("DB_USER")
-db_PASSWORD = os.getenv("DB_PASSWORD")
-db_NAME = os.getenv("DB_NAME")
+DB_HOST = os.getenv("DB_HOST")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_NAME = os.getenv("DB_NAME")
 
-DATABASE_URL = ( f"mysql+mysqlconnector://{db_USER}:{db_PASSWORD}@{db_HOST}:{db_PORT}/{db_NAME}" )
+
+DATABASE_URL = (
+    f"mysql+mysqlconnector://"
+    f"{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}"
+)
 
 engine = create_engine(DATABASE_URL)
 
@@ -20,7 +23,10 @@ SessionLocal = sessionmaker(
     bind=engine
 )
 
-print(f"Database connection established to {db_NAME} at {db_HOST}:{db_PORT} as user {db_USER}")
+
+def get_db_session():
+    return SessionLocal()
+
 print("SQLAlchemy engine and session created successfully!")
 
 db = SessionLocal()
