@@ -213,3 +213,20 @@ def delete_user(user_id):
         except Exception:
             db.rollback()
             raise
+
+def login_user(email, password):
+    if not email or not password:
+        return None, "Email and password are required."
+
+    with get_db_session() as db:
+        user = db.scalar(
+            select(User).where(User.email == email)
+        )
+
+        if not user:
+            return None, "Invalid email or password."
+
+        if not bcrypt.checkpw(password.encode("utf-8"), user.password.encode("utf-8")):
+            return None, "Invalid email or password."
+
+        return user_to_dict(user), None

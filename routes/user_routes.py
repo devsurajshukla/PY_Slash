@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request
-from controllers.user_controller import get_users, create_user, update_user, delete_user
+from controllers.user_controller import get_users, create_user, update_user, delete_user, login_user
 
 user_routes = Blueprint('user_routes', __name__)
 
@@ -59,4 +59,24 @@ def remove_user(user_id):
     return jsonify({
         "success": True,
         "message": "User deleted successfully."
+    })
+
+@user_routes.route('/login', methods=['POST'])
+def login():
+    login_data = request.get_json()
+    email = login_data.get('email')
+    password = login_data.get('password')
+
+    user, error = login_user(email, password)
+
+    if error:
+        return jsonify({
+            "success": False,
+            "message": error
+        }), 400
+
+    return jsonify({
+        "success": True,
+        "message": "Login successful.",
+        "data": user
     })
