@@ -1,6 +1,7 @@
 from db import get_db_connection
 from db_sqlalchemy import get_db_session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from models.user import User
 import bcrypt
 import re
@@ -27,112 +28,83 @@ def hash_password(password):
 
 
 def get_users():
-    db = None
-
-    try:
-        db = get_db_session()
-        users = db.query(User).all()
-
-        users_data = []
-
-        for user in users:
-            users_data.append({
-                "id": user.id,
-                "name": user.name,
-                "email": user.email,
-                "role": user.role
-            })
-
-        return users_data
-
-    except Exception as e:
-        print(f"Error fetching users: {e}")
-        raise
-
-    finally:
-        if db:
-            db.close()
-
+    with get_db_session() as db:
+        users = db.scalars(select(User)).all()
+        return [user_to_dict(user) for user in users]
 
 def create_user(user_data):
-    db = None
+    if not user_data:
+        return None, "Request body is required."
+    
+    required_fields = ["name", "email", "password", "role"]
+    for field in required_fields:
+        if field not in user_data:
+            return None, f"{field} is required."
 
-    try:
+    name = user_data["name"]
+    email = user_data["email"]
+    password = user_data["password"]
+    role = user_data["role"]
 
-        if not user_data:
-            return None, "Request body is required."
+    if not all(isinstance(v, str) for v in
+               [name, email, password, role]):
+        return None, "All fields must be strings."
 
-        required_fields = ["name", "email", "password", "role"]
+    name = name.strip()
+    email = email.strip()
+    role = role.strip()
 
-        for field in required_fields:
-            if field not in user_data:
-                return None, f"{field} is required."
+    if not name:
+        return None, "Name cannot be empty."
 
-        name = user_data["name"].strip()
-        email = user_data["email"].strip()
-        password = user_data["password"]
-        role = user_data["role"].strip()
+    if not email:
+        return None, "Email cannot be empty."
 
-        # Empty value validation
-        if not name:
-            return None, "Name cannot be empty."
+    if not password:
+        return None, "Password cannot be empty."
 
-        if not email:
-            return None, "Email cannot be empty."
+    if len(password) < 8:
+        return None, "Password must be at least 8 characters."
 
-        if not password:
-            return None, "Password cannot be empty."
-        
-        if len(password) < 8:
-                return None, "Password must be at least 8 characters"
+    if not role:
+        return None, "Role cannot be empty."
 
-        if not role:
-            return None, "Role cannot be empty."
+    if not is_valid_email(email):
+        return None, "Invalid email address."
 
-        # Email validation
-        if not is_valid_email(email):
-            return None, "Invalid email address."
+    # bcrypt has a 72-byte password limit.
+    if len(password.encode("utf-8")) > 72:
+        return None, "Password must not exceed 72 UTF-8 bytes."
 
-        db = get_db_session()
+    with get_db_session() as db:
+        try:
+            existing = db.scalar(
+                select(User).where(User.email == email)
+            )
 
-        existing_user = db.query(User).filter_by(email=email).first()
+            if existing:
+                return None, "Email already exists."
 
-        if existing_user:
-            return None, "Email already exists."
-
-        hashed_password = bcrypt.hashpw(
-                password.encode("utf-8"),
-                bcrypt.gensalt()
-            ).decode("utf-8")
-
-        new_user = User(
+            new_user = User(
                 name=name,
                 email=email,
                 role=role,
-                password=hashed_password
-        )
+                password=hash_password(password)
+            )
 
-        db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
+            db.add(new_user)
+            db.commit()
+            db.refresh(new_user)
 
-        return {
-                "id": new_user.id,
-                "name": new_user.name,
-                "email": new_user.email,
-                "role": new_user.role
-            }, None
+            return user_to_dict(new_user), None
 
-    except Exception as e:
-        if db:
-         db.rollback()
+        except IntegrityError:
+            db.rollback()
+            return None, "Email already exists or data is invalid."
 
-        print(f"Error creating user: {e}")
-        raise
-
-    finally:
-        if db:
-            db.close()
+        except Exception:
+            db.rollback()
+            raise
 
 
 
@@ -143,15 +115,20 @@ def update_user(user_id, user_data):
         return None, "Request body is required."
 
     required_fields = ["name", "email", "role"]
-
     for field in required_fields:
         if field not in user_data:
             return None, f"{field} is required."
-
-    # Get values OUTSIDE the for loop
+        
     name = user_data["name"].strip()
     email = user_data["email"].strip()
     role = user_data["role"].strip()
+
+    if not all(isinstance(v, str) for v in [name, email, role]):
+        return None, "Name, email and role must be strings."
+
+    name = name.strip()
+    email = email.strip()
+    role = role.strip()
 
     # Empty value validation
     if not name:
@@ -162,129 +139,77 @@ def update_user(user_id, user_data):
 
     if not role:
         return None, "Role cannot be empty."
-
-    # Email validation
+    
     if not is_valid_email(email):
-        return None, "Invalid email address."
+            return None, "Invalid email address."
 
-    db = None
-    cursor = None
+    password = user_data.get("password")
 
-    try:
-        db = get_db_connection()
-        cursor = db.cursor(dictionary=True)
+    if password is not None:
+        if not isinstance(password, str):
+            return None, "Password must be a string."
 
-        # Check if user exists
-        cursor.execute(
-            "SELECT * FROM users WHERE id = %s",
-            (user_id,)
-        )
+        if not password:
+            return None, "Password cannot be empty."
 
-        user = cursor.fetchone()
+        if len(password) < 8:
+            return None, "Password must be at least 8 characters."
 
-        if not user:
-            return None, "User not found."
+        if len(password.encode("utf-8")) > 72:
+            return None, "Password must not exceed 72 UTF-8 bytes."
 
-        # Check duplicate email
-        # Exclude current user's own ID
-        cursor.execute(
-            """
-            SELECT id
-            FROM users
-            WHERE email = %s
-            AND id != %s
-            """,
-            (email, user_id)
-        )
 
-        dup = cursor.fetchone()
+    with get_db_session() as db:
+        try:
+            user = db.scalar(
+                select(User).where(User.id == user_id)
+            )
 
-        if dup:
-            return None, "Email already exists."
+            if not user:
+                return None, "User not found."
 
-        # Update user
-        query = """
-            UPDATE users
-            SET name = %s,
-                email = %s,
-                role = %s
-            WHERE id = %s
-        """
+            # Check for email uniqueness
+            existing_user = db.scalar(
+                select(User).where(User.email == email, User.id != user_id)
+            )
 
-        value = (name, email, role, user_id)
+            if existing_user:
+                return None, "Email already exists."
 
-        cursor.execute(query, value)
-        db.commit()
+            user.name = name
+            user.email = email
+            user.role = role
 
-        # Get updated user
-        cursor.execute(
-            "SELECT * FROM users WHERE id = %s",
-            (user_id,)
-        )
+            if password is not None:
+                user.password = hash_password(password)
 
-        updated_user = cursor.fetchone()
+            db.commit()
+            db.refresh(user)
 
-        return updated_user, None
+            return user_to_dict(user), None
 
-    except Exception as e:
-
-        if db:
+        except IntegrityError:
             db.rollback()
+            return None, "Email already exists or data is invalid."
 
-        print(f"Error updating user: {e}")
-        raise
-
-    finally:
-
-        if cursor:
-            cursor.close()
-
-        if db:
-            db.close()
+        except Exception:
+            db.rollback()
+            raise
 
 
 def delete_user(user_id):
+    with get_db_session() as db:
+        try:
+            user = db.get(User, user_id)
 
-    db = None
-    cursor = None
+            if not user:
+                return False, "User not found."
 
-    try:
-        db = get_db_connection()
-        cursor = db.cursor(dictionary=True)
+            db.delete(user)
+            db.commit()
 
-        # Check if user exists
-        cursor.execute(
-            "SELECT * FROM users WHERE id = %s",
-            (user_id,)
-        )
+            return True, None
 
-        user = cursor.fetchone()
-
-        if not user:
-            return False, "User not found."
-
-        # Delete user
-        cursor.execute(
-            "DELETE FROM users WHERE id = %s",
-            (user_id,)
-        )
-
-        db.commit()
-
-        return True, None
-
-    except Exception as e:
-
-        if db:
+        except Exception:
             db.rollback()
-
-        print(f"Error deleting user: {e}")
-        raise
-
-    finally:
-
-        if cursor:
-            cursor.close()
-
-        if db:
-            db.close()
+            raise
