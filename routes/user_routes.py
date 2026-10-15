@@ -1,5 +1,7 @@
 from flask import Blueprint, jsonify, request
 from controllers.user_controller import get_users, create_user, update_user, delete_user, login_user
+from middleware.auth_middleware import token_required, role_required
+
 
 user_routes = Blueprint('user_routes', __name__)
 
@@ -87,4 +89,30 @@ def login():
         "success": True,
         "message": "Login successful.",
         "data": user
+    }), 200
+
+
+@user_routes.route("/profile", methods=["GET"])
+@token_required
+def profile():
+
+    payload = request.current_user
+
+    return jsonify({
+        "success": True,
+        "message": "Profile access successful.",
+        "data": {
+            "user_id": payload["sub"],
+            "role": payload["role"]
+        }
+    }), 200
+
+@user_routes.route("/admin/dashboard", methods=["GET"])
+@token_required
+@role_required("admin")
+def admin_dashboard():
+
+    return jsonify({
+        "success": True,
+        "message": "Welcome to Admin Dashboard."
     }), 200
